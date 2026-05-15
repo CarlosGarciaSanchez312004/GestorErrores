@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor de Errores</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- ══════════ SIDEBAR ══════════ -->
+<aside class="sidebar">
+    <div class="sidebar-logo">
+        <img src="/img/logo.png" alt="Logo"
+             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+        <span class="logo-texto" style="display:none">
+        <i class="ti ti-cube-3d-sphere" aria-hidden="true"></i> Empresa
+      </span>
+    </div>
+
+    <nav class="sidebar-nav">
+        <span class="sidebar-label">Proyectos</span>
+
+        <a class="sidebar-item active" data-id="" onclick="seleccionarProyecto(this, '', 'Todos los proyectos')">
+            <i class="ti ti-layout-grid" aria-hidden="true"></i>
+            Todos
+            <span class="sidebar-count" id="cnt-total">—</span>
+        </a>
+
+        <!-- Se rellena dinámicamente -->
+        <div id="lista-proyectos"></div>
+    </nav>
+
+    <div class="sidebar-footer">
+        <div class="avatar" id="user-avatar">??</div>
+        <div class="user-info">
+            <div class="sidebar-username" id="user-nombre">—</div>
+            <div class="sidebar-role" id="user-rol">—</div>
+        </div>
+        <button class="btn-logout" onclick="logout()" title="Cerrar sesión">
+            <i class="ti ti-logout" style="font-size:16px" aria-label="Cerrar sesión"></i>
+        </button>
+    </div>
+</aside>
+
+<!-- ══════════ CONTENIDO PRINCIPAL ══════════ -->
+<main class="main">
+
+    <!-- Top bar -->
+    <div class="topbar">
+        <div class="breadcrumb">
+            <span>Proyectos</span>
+            <span class="breadcrumb-sep">›</span>
+            <span class="breadcrumb-cur" id="titulo-proyecto">Todos los proyectos</span>
+        </div>
+
+        <!-- El botón de admin solo aparece si el usuario es ADMIN -->
+        <a href="admin.html" class="btn" id="btn-admin" style="display:none">
+            <i class="ti ti-settings" aria-hidden="true"></i> Admin
+        </a>
+        <a href="nuevo-error.html" class="btn btn-primary">
+            <i class="ti ti-plus" aria-hidden="true"></i> Nuevo error
+        </a>
+    </div>
+
+    <!-- Barra de filtros -->
+    <div class="filterbar">
+        <select class="filter-select" id="f-area" onchange="aplicarFiltros()">
+            <option value="">Área</option>
+        </select>
+
+        <select class="filter-select" id="f-topic" onchange="aplicarFiltros()">
+            <option value="">Topic</option>
+        </select>
+
+        <select class="filter-select" id="f-persona" onchange="aplicarFiltros()">
+            <option value="">Reportado por</option>
+        </select>
+
+        <select class="filter-select" id="f-estado" onchange="aplicarFiltros()">
+            <option value="">Estado</option>
+            <option value="PENDING">Pendiente</option>
+            <option value="SOLVED">Resuelto</option>
+        </select>
+
+        <button class="btn-limpiar" id="btn-limpiar" onclick="limpiarFiltros()">
+            <i class="ti ti-x" style="font-size:12px" aria-hidden="true"></i> Limpiar
+        </button>
+    </div>
+
+    <!-- Chips de filtros activos -->
+    <div class="chips-bar" id="chips"></div>
+
+    <!-- Stats -->
+    <div class="stats-bar">
+        <div class="stat">
+            <div class="stat-number" id="s-total">—</div>
+            <div class="stat-label">Total</div>
+        </div>
+        <div class="stat">
+            <div class="stat-number pendiente" id="s-pendientes">—</div>
+            <div class="stat-label">Pendientes</div>
+        </div>
+        <div class="stat">
+            <div class="stat-number resuelto" id="s-resueltos">—</div>
+            <div class="stat-label">Resueltos</div>
+        </div>
+    </div>
+
+    <!-- Lista de errores -->
+    <div class="error-list" id="lista-errores">
+        <div class="loading">Cargando errores...</div>
+    </div>
+
+</main>
+
+<script src="/api.js"></script><script>
+    // ══════════ ESTADO ══════════
+    let filtros = {
+        proyectoId: '',
+        areaId:     '',
+        topicId:    '',
+        reportedBy: '',
+        status:     ''
+    };
+
+    // Texto descriptivo para los chips (se rellena al cargar selects)
+    const labelsAreas   = {};
+    const labelsTopics  = {};
+    const labelsUsuarios = {};
+
+    // ══════════ INICIO ══════════
+    document.addEventListener('DOMContentLoaded', async () => {
+        const usuario = checkAuth();
+        if (!usuario) return;
+
+        pintarUsuario(usuario);
+
+        // Si es admin, mostrar botón admin
+        if (usuario.role === 'ADMIN') {
+            document.getElementById('btn-admin').style.display = 'flex';
+        }
+
+        // Carga paralela de datos para los selectores
+        await Promise.all([
+            cargarProyectos(),
+            cargarAreas(),
+            cargarTopics(),
+            cargarUsuarios()
+        ]);
+
+        // Carga inicial de errores
+        await cargarErrores();
+    });
+
+    // ══════════ USUARIO ══════════
+    function pintarUsuario(u) {
+        document.getElementById('user-nombre').textContent = `${u.nombre} ${u.apellido}`;
+        document.getElementById('user-rol').textContent = u.role === 'ADMIN' ? 'Administrador' : 'Usuario';
+
+        const av = document.getElementById('user-avatar');
+        if (u.picture) {
+            av.innerHTML = `<img src="${u.picture}" alt="${u.nombre}">`;
+        } else {
+            av.textContent = iniciales(u.nombre, u.apellido);
+        }
+    }
+
+    // ══════════ PROYECTOS ══════════
+    async function cargarProyectos() {
+        try {
+            const lista = await proyectos.listar();
+            const cont  = document.getElementById('lista-proyectos');
+
+            cont.innerHTML = lista.map(p => `
+          <a class="sidebar-item"
+             data-id="${p.id}"
+             onclick="seleccionarProyecto(this, '${p.id}', '${p.name.replace(/'/g, "\\'")}')">
+            <i class="ti ti-cube-3d-sphere" aria-hidden="true"></i>
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>
+            <span class="sidebar-count">${p.totalErrores ?? ''}</span>
+          </a>
+        `).join('');
+        } catch {
+            document.getElementById('lista-proyectos').innerHTML =
+                '<span style="padding:8px 16px;font-size:11px;color:rgba(255,255,255,0.3)">Error al cargar</span>';
+        }
+    }
+
+    function seleccionarProyecto(el, proyectoId, nombre) {
+        document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+        el.classList.add('active');
+        filtros.proyectoId = proyectoId;
+        document.getElementById('titulo-proyecto').textContent = nombre;
+        aplicarFiltros();
+    }
+
+    // ══════════ SELECTS DE FILTRO ══════════
+    async function cargarAreas() {
+        try {
+            const lista = await areas.listar();
+            const sel   = document.getElementById('f-area');
+            lista.forEach(a => {
+                labelsAreas[a.id] = a.name;
+                sel.innerHTML += `<option value="${a.id}">${a.name}</option>`;
+            });
+        } catch {}
+    }
+
+    async function cargarTopics() {
+        try {
+            const lista = await topics.listar();
+            const sel   = document.getElementById('f-topic');
+            lista.forEach(t => {
+                labelsTopics[t.id] = t.name;
+                sel.innerHTML += `<option value="${t.id}">${t.name}</option>`;
+            });
+        } catch {}
+    }
+
+    async function cargarUsuarios() {
+        try {
+            const lista = await usuarios.listar();
+            const sel   = document.getElementById('f-persona');
+            lista.forEach(u => {
+                const nombre = `${u.nombre} ${u.apellido}`;
+                labelsUsuarios[u.id] = nombre;
+                sel.innerHTML += `<option value="${u.id}">${nombre}</option>`;
+            });
+        } catch {}
+    }
+
+    // ══════════ FILTROS ══════════
+    function aplicarFiltros() {
+        filtros.areaId     = document.getElementById('f-area').value;
+        filtros.topicId    = document.getElementById('f-topic').value;
+        filtros.reportedBy = document.getElementById('f-persona').value;
+        filtros.status     = document.getElementById('f-estado').value;
+
+        const hayFiltros = Object.values(filtros).some(v => v !== '');
+        document.getElementById('btn-limpiar').classList.toggle('visible', hayFiltros);
+
+        renderChips();
+        cargarErrores();
+    }
+
+    function limpiarFiltros() {
+        filtros = { proyectoId: filtros.proyectoId, areaId: '', topicId: '', reportedBy: '', status: '' };
+        ['f-area', 'f-topic', 'f-persona', 'f-estado'].forEach(id => {
+            document.getElementById(id).value = '';
+        });
+        document.getElementById('btn-limpiar').classList.remove('visible');
+        document.getElementById('chips').innerHTML = '';
+        cargarErrores();
+    }
+
+    function renderChips() {
+        const chips = document.getElementById('chips');
+        const defs = [
+            { key: 'areaId',     label: 'Área: '    + (labelsAreas[filtros.areaId]       || filtros.areaId),     show: !!filtros.areaId },
+            { key: 'topicId',    label: 'Topic: '   + (labelsTopics[filtros.topicId]      || filtros.topicId),    show: !!filtros.topicId },
+            { key: 'reportedBy', label: 'Persona: ' + (labelsUsuarios[filtros.reportedBy] || filtros.reportedBy), show: !!filtros.reportedBy },
+            { key: 'status',     label: 'Estado: '  + (filtros.status === 'PENDING' ? 'Pendiente' : 'Resuelto'), show: !!filtros.status }
+        ];
+
+        chips.innerHTML = defs
+            .filter(d => d.show)
+            .map(d => `
+          <span class="chip">
+            ${d.label}
+            <button onclick="quitarChip('${d.key}')" aria-label="Quitar filtro">×</button>
+          </span>
+        `).join('');
+    }
+
+    function quitarChip(key) {
+        filtros[key] = '';
+        // Resetear el select correspondiente
+        const mapa = { areaId: 'f-area', topicId: 'f-topic', reportedBy: 'f-persona', status: 'f-estado' };
+        if (mapa[key]) document.getElementById(mapa[key]).value = '';
+        const hayFiltros = Object.values(filtros).some(v => v !== '');
+        document.getElementById('btn-limpiar').classList.toggle('visible', hayFiltros);
+        renderChips();
+        cargarErrores();
+    }
+
+    // ══════════ CARGA Y PINTADO DE ERRORES ══════════
+    async function cargarErrores() {
+        document.getElementById('lista-errores').innerHTML = '<div class="loading">Cargando...</div>';
+
+        try {
+            const lista = await errores.listar(filtros);
+            pintarErrores(lista);
+        } catch (e) {
+            document.getElementById('lista-errores').innerHTML = `
+          <div class="empty-state">
+            <i class="ti ti-alert-circle" aria-hidden="true"></i>
+            No se pudo conectar con el servidor.<br>
+            <small style="font-size:11px">${e.message}</small>
+          </div>`;
+        }
+    }
+
+    function pintarErrores(lista) {
+        const cont  = document.getElementById('lista-errores');
+        const pend  = lista.filter(e => e.status === 'PENDING').length;
+        const sol   = lista.filter(e => e.status === 'SOLVED').length;
+
+        document.getElementById('s-total').textContent      = lista.length;
+        document.getElementById('s-pendientes').textContent = pend;
+        document.getElementById('s-resueltos').textContent  = sol;
+        document.getElementById('cnt-total').textContent    = lista.length;
+
+        if (!lista.length) {
+            cont.innerHTML = `
+          <div class="empty-state">
+            <i class="ti ti-search-off" aria-hidden="true"></i>
+            Sin errores con los filtros aplicados
+          </div>`;
+            return;
+        }
+
+        cont.innerHTML = lista.map(e => {
+            const estado  = e.status === 'PENDING' ? 'pendiente' : 'resuelto';
+            const etiqEst = e.status === 'PENDING' ? 'Pendiente'  : 'Resuelto';
+            const desc    = e.descriptionProblem || 'Sin descripción';
+            const resumen = desc.length > 90 ? desc.substring(0, 90) + '…' : desc;
+            const nombre  = e.reportedBy ? `${e.reportedBy.nombre} ${e.reportedBy.apellido}` : '—';
+
+            return `
+          <a class="error-row" href="detalle.html?id=${e.id}">
+            <span class="badge badge-${estado}">${etiqEst}</span>
+            <div class="error-info">
+              <div class="error-title">${resumen}</div>
+              <div class="error-meta">
+                <span><i class="ti ti-user" aria-hidden="true"></i>${nombre}</span>
+                <span><i class="ti ti-clock" aria-hidden="true"></i>${tiempoRelativo(e.createdAt)}</span>
+                <span><i class="ti ti-folder" aria-hidden="true"></i>${e.proyecto?.name ?? '—'}</span>
+                ${e.area ? `<span><i class="ti ti-layers-subtract" aria-hidden="true"></i>${e.area.name}</span>` : ''}
+              </div>
+            </div>
+            <span class="area-tag">${e.area?.name ?? '—'}</span>
+          </a>`;
+        }).join('');
+    }
+</script>
+</body>
+</html>

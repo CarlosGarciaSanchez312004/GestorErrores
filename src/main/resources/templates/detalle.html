@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detalle de error</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- ══════════ SIDEBAR ══════════ -->
+<aside class="sidebar">
+    <div class="sidebar-logo">
+        <img src="/img/logo.png" alt="Logo"
+             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+        <span class="logo-texto" style="display:none">
+        <i class="ti ti-cube-3d-sphere" aria-hidden="true"></i> Empresa
+      </span>
+    </div>
+
+    <nav class="sidebar-nav">
+        <span class="sidebar-label">Proyectos</span>
+        <div id="lista-proyectos"></div>
+    </nav>
+
+    <div class="sidebar-footer">
+        <div class="avatar" id="user-avatar">??</div>
+        <div class="user-info">
+            <div class="sidebar-username" id="user-nombre">—</div>
+            <div class="sidebar-role" id="user-rol">—</div>
+        </div>
+        <button class="btn-logout" onclick="logout()" title="Cerrar sesión">
+            <i class="ti ti-logout" style="font-size:16px" aria-label="Cerrar sesión"></i>
+        </button>
+    </div>
+</aside>
+
+<!-- ══════════ CONTENIDO PRINCIPAL ══════════ -->
+<main class="main" id="main-content">
+
+    <!-- Top bar -->
+    <div class="topbar">
+        <a href="/" class="btn" style="flex-shrink:0">
+            <i class="ti ti-arrow-left" aria-hidden="true"></i> Volver
+        </a>
+
+        <div class="breadcrumb">
+            <span id="bc-proyecto">Proyectos</span>
+            <span class="breadcrumb-sep">›</span>
+            <span class="breadcrumb-cur" id="bc-error">Error #—</span>
+        </div>
+
+        <span class="badge" id="estado-badge">—</span>
+
+        <!-- Solo visible para el propietario o admin -->
+        <a id="btn-editar" href="#" class="btn" style="display:none">
+            <i class="ti ti-edit" aria-hidden="true"></i> Editar
+        </a>
+
+        <button id="btn-resolver" class="btn btn-primary" style="display:none"
+                onclick="abrirModalResolver()">
+            <i class="ti ti-check" aria-hidden="true"></i>
+            <span id="resolver-label">Marcar como resuelto</span>
+        </button>
+    </div>
+
+    <!-- Cuerpo con dos columnas -->
+    <div class="detalle-body" id="detalle-cuerpo">
+        <div class="loading">Cargando error...</div>
+    </div>
+
+</main>
+
+<!-- ══════════ MODAL: RESOLVER ERROR ══════════ -->
+<div class="modal-overlay" id="modal-resolver">
+    <div class="modal">
+        <div class="modal-titulo">
+            <i class="ti ti-check-circle" style="font-size:18px;color:#1A6B3C" aria-hidden="true"></i>
+            Marcar como resuelto
+        </div>
+
+        <div class="modal-campo">
+            <label for="inp-solution">Solución breve <span style="color:#B91C1C">*</span></label>
+            <input class="input" id="inp-solution" type="text" placeholder="Describe en una línea qué solucionó el error">
+        </div>
+
+        <div class="modal-campo">
+            <label for="inp-desc-sol">Descripción detallada</label>
+            <textarea class="textarea" id="inp-desc-sol"
+                      placeholder="Pasos, código, configuraciones aplicadas..."></textarea>
+        </div>
+
+        <div class="modal-acciones">
+            <button class="btn" onclick="cerrarModal()">Cancelar</button>
+            <button class="btn btn-success" onclick="confirmarResolver()">
+                <i class="ti ti-check" aria-hidden="true"></i> Confirmar
+            </button>
+        </div>
+    </div>
+</div>
+
+<script src="/api.js"></script>
+<script>
+    // ══════════ ESTADO ══════════
+    let errorActual  = null;
+    let usuarioActual = null;
+    let errorId      = null;
+
+    // ══════════ INICIO ══════════
+    document.addEventListener('DOMContentLoaded', async () => {
+        usuarioActual = checkAuth();
+        if (!usuarioActual) return;
+
+        pintarUsuario(usuarioActual);
+        cargarProyectosSidebar();
+
+        // Leer el ID del error desde la URL: detalle.html?id=5
+        const params = new URLSearchParams(window.location.search);
+        errorId = params.get('id');
+
+        if (!errorId) {
+            document.getElementById('detalle-cuerpo').innerHTML =
+                '<div class="empty-state"><i class="ti ti-alert-circle"></i>No se especificó ningún error.</div>';
+            return;
+        }
+
+        await cargarError();
+    });
+
+    // ══════════ USUARIO ══════════
+    function pintarUsuario(u) {
+        document.getElementById('user-nombre').textContent = `${u.nombre} ${u.apellido}`;
+        document.getElementById('user-rol').textContent = u.role === 'ADMIN' ? 'Administrador' : 'Usuario';
+        const av = document.getElementById('user-avatar');
+        if (u.picture) {
+            av.innerHTML = `<img src="${u.picture}" alt="${u.nombre}">`;
+        } else {
+            av.textContent = iniciales(u.nombre, u.apellido);
+        }
+    }
+
+    // ══════════ SIDEBAR ══════════
+    async function cargarProyectosSidebar() {
+        try {
+            const lista = await proyectos.listar();
+            document.getElementById('lista-proyectos').innerHTML = lista.map(p => `
+          <a class="sidebar-item" href="index.html?proyectoId=${p.id}">
+            <i class="ti ti-cube-3d-sphere" aria-hidden="true"></i>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>
+          </a>`).join('');
+        } catch {}
+    }
+
+    // ══════════ CARGA DEL ERROR ══════════
+    async function cargarError() {
+        try {
+            errorActual = await errores.getById(errorId);
+            pintarDetalle(errorActual);
+            await cargarComentarios();
+            await cargarAdjuntos();
+        } catch (e) {
+            document.getElementById('detalle-cuerpo').innerHTML = `
+          <div class="empty-state">
+            <i class="ti ti-alert-circle" aria-hidden="true"></i>
+            No se pudo cargar el error.<br>
+            <small style="font-size:11px">${e.message}</small>
+          </div>`;
+        }
+    }
+
+    // ══════════ PINTADO DEL DETALLE ══════════
+    function pintarDetalle(e) {
+        // Breadcrumb
+        document.getElementById('bc-proyecto').textContent = e.proyecto?.name ?? 'Proyectos';
+        document.getElementById('bc-error').textContent    = `Error #${e.id}`;
+        document.title = `Error #${e.id} — Gestor`;
+
+        // Badge de estado
+        const badge = document.getElementById('estado-badge');
+        const resuelto = e.status === 'SOLVED';
+        badge.textContent  = resuelto ? 'Resuelto' : 'Pendiente';
+        badge.className    = `badge badge-${resuelto ? 'resuelto' : 'pendiente'}`;
+
+        // Determinar si el usuario es propietario o admin
+        const esPropietario = e.reportedBy?.id === usuarioActual.id;
+        const esAdmin       = usuarioActual.role === 'ADMIN';
+        const puedeEditar   = esPropietario || esAdmin;
+
+        // Mostrar botones según permisos
+        if (puedeEditar) {
+            const btnEditar  = document.getElementById('btn-editar');
+            const btnResolver = document.getElementById('btn-resolver');
+            btnEditar.style.display  = 'flex';
+            btnEditar.href = `nuevo-error.html?id=${e.id}`;
+            btnResolver.style.display = 'flex';
+            actualizarBtnResolver(resuelto);
+        }
+
+        // ── Construir layout de dos columnas ──
+        document.getElementById('detalle-cuerpo').innerHTML = `
+
+        <!-- COLUMNA IZQUIERDA -->
+        <div class="detalle-izq">
+
+          <!-- Cabecera del error -->
+          <div>
+            <div class="detalle-titulo">${esc(e.descriptionProblem?.split('\n')[0] ?? 'Sin título')}</div>
+            <div class="detalle-subtitulo" style="margin-top:6px">
+              ${e.topic    ? `<span><i class="ti ti-tag" aria-hidden="true"></i>${esc(e.topic.name)}</span>` : ''}
+              ${e.area     ? `<span><i class="ti ti-layers-subtract" aria-hidden="true"></i>${esc(e.area.name)}</span>` : ''}
+              <span><i class="ti ti-clock" aria-hidden="true"></i>Creado ${tiempoRelativo(e.createdAt)}</span>
+            </div>
+          </div>
+
+          <!-- Descripción del problema -->
+          <div>
+            <div class="sec-title">
+              <i class="ti ti-file-description" aria-hidden="true"></i> Descripción del problema
+            </div>
+            <div class="prose">${esc(e.descriptionProblem ?? '—')}</div>
+          </div>
+
+          <!-- Solución -->
+          <div>
+            <div class="sec-title">
+              <i class="ti ti-bulb" aria-hidden="true"></i> Solución
+            </div>
+            <div id="bloque-solucion">
+              ${renderBloqueSolucion(e)}
+            </div>
+          </div>
+
+          <!-- Adjuntos (se rellena con cargarAdjuntos()) -->
+          <div>
+            <div class="sec-title">
+              <i class="ti ti-paperclip" aria-hidden="true"></i>
+              Adjuntos <span id="adjuntos-count" style="font-weight:400;color:var(--gris-texto)"></span>
+            </div>
+            <div id="lista-adjuntos">
+              <div class="loading" style="padding:12px 0">Cargando adjuntos...</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Comentarios (se rellena con cargarComentarios()) -->
+          <div>
+            <div class="sec-title">
+              <i class="ti ti-message" aria-hidden="true"></i>
+              Comentarios <span id="comentarios-count" style="font-weight:400;color:var(--gris-texto)"></span>
+            </div>
+            <div class="comment-list" id="lista-comentarios">
+              <div class="loading" style="padding:12px 0">Cargando comentarios...</div>
+            </div>
+
+            <!-- Formulario añadir comentario -->
+            <div class="comment-form" style="margin-top:14px">
+              <div class="avatar" id="avatar-comentario">??</div>
+              <textarea class="comment-input" id="input-comentario"
+                        placeholder="Añade un comentario..."></textarea>
+              <button class="btn-comentar" onclick="enviarComentario()">Enviar</button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- COLUMNA DERECHA: METADATA -->
+        <div class="detalle-der">
+          <div style="font-size:11px;font-weight:600;color:var(--gris-texto);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">
+            Información
+          </div>
+
+          <div class="meta-label">Proyecto</div>
+          <div class="meta-valor">
+            <i class="ti ti-cube-3d-sphere" aria-hidden="true"></i>
+            ${esc(e.proyecto?.name ?? '—')}
+          </div>
+
+          <div class="meta-label">Área</div>
+          <div class="meta-valor">
+            <i class="ti ti-layers-subtract" aria-hidden="true"></i>
+            ${esc(e.area?.name ?? '—')}
+          </div>
+
+          <div class="meta-label">Topic</div>
+          <div class="meta-valor">
+            <i class="ti ti-tag" aria-hidden="true"></i>
+            ${esc(e.topic?.name ?? '—')}
+          </div>
+
+          <div class="meta-label">Reportado por</div>
+          <div class="meta-valor">
+            <div class="meta-av">${iniciales(e.reportedBy?.nombre, e.reportedBy?.apellido)}</div>
+            ${esc(e.reportedBy ? `${e.reportedBy.nombre} ${e.reportedBy.apellido}` : '—')}
+          </div>
+
+          <div class="meta-label">Estado</div>
+          <div class="meta-valor" id="meta-estado-val">
+            <span class="badge badge-${resuelto ? 'resuelto' : 'pendiente'}">
+              ${resuelto ? 'Resuelto' : 'Pendiente'}
+            </span>
+          </div>
+
+          <div class="meta-label">Creado</div>
+          <div class="meta-valor" style="font-size:11px;color:var(--gris-texto)">
+            ${formatFecha(e.createdAt)}
+          </div>
+
+          <div class="meta-label">Actualizado</div>
+          <div class="meta-valor" style="font-size:11px;color:var(--gris-texto)" id="meta-updated">
+            ${formatFecha(e.updatedAt)}
+          </div>
+        </div>
+      `;
+
+        // Poner iniciales en avatar del formulario de comentario
+        const avComent = document.getElementById('avatar-comentario');
+        if (usuarioActual?.picture) {
+            avComent.innerHTML = `<img src="${usuarioActual.picture}" alt="${usuarioActual.nombre}">`;
+        } else {
+            avComent.textContent = iniciales(usuarioActual?.nombre, usuarioActual?.apellido);
+        }
+    }
+
+    function renderBloqueSolucion(e) {
+        if (e.status !== 'SOLVED') {
+            return `<div class="sol-vacia">
+          <i class="ti ti-lock-open" aria-hidden="true"></i>
+          Sin solución todavía. Solo el propietario puede marcar el error como resuelto.
+        </div>`;
+        }
+        return `<div class="sol-rellena">
+        <div class="sol-rellena-titulo">
+          <i class="ti ti-check" aria-hidden="true"></i> Solución aplicada
+        </div>
+        <div class="sol-rellena-texto"><strong>${esc(e.solution ?? '')}</strong></div>
+        ${e.descriptionSolution ? `<div class="sol-rellena-texto" style="margin-top:8px">${esc(e.descriptionSolution)}</div>` : ''}
+      </div>`;
+    }
+
+    // ══════════ ADJUNTOS ══════════
+    async function cargarAdjuntos() {
+        const cont = document.getElementById('lista-adjuntos');
+        if (!cont) return;
+        try {
+            const lista = await adjuntos.listar(errorId);
+            document.getElementById('adjuntos-count').textContent = `(${lista.length})`;
+
+            if (!lista.length) {
+                cont.innerHTML = '<div style="font-size:12px;color:var(--gris-texto);padding:4px 0">Sin adjuntos</div>';
+                return;
+            }
+
+            cont.innerHTML = `<div class="attach-list">
+          ${lista.map(a => {
+                const tipo = iconoAdjunto(a.fileType);
+                const url  = adjuntos.urlDescarga(a.id);
+                return `
+              <a class="attach-item" href="${url}" target="_blank" rel="noopener">
+                <div class="attach-icon ${tipo.clase}">
+                  <i class="ti ${tipo.icono}" aria-hidden="true"></i>
+                </div>
+                <div>
+                  <div class="attach-name">${esc(a.filename)}</div>
+                  <div class="attach-size">${esc(a.fileType ?? '')}</div>
+                </div>
+                <i class="ti ti-download attach-dl" aria-hidden="true"></i>
+              </a>`;
+            }).join('')}
+        </div>`;
+        } catch {
+            cont.innerHTML = '<div style="font-size:12px;color:var(--gris-texto)">No se pudieron cargar los adjuntos</div>';
+        }
+    }
+
+    // ══════════ COMENTARIOS ══════════
+    async function cargarComentarios() {
+        const cont = document.getElementById('lista-comentarios');
+        if (!cont) return;
+        try {
+            const lista = await comentarios.listar(errorId);
+            document.getElementById('comentarios-count').textContent = `(${lista.length})`;
+
+            if (!lista.length) {
+                cont.innerHTML = '<div style="font-size:12px;color:var(--gris-texto);padding:4px 0">Sé el primero en comentar</div>';
+                return;
+            }
+
+            cont.innerHTML = lista.map(c => renderComentario(c)).join('');
+        } catch {
+            cont.innerHTML = '<div style="font-size:12px;color:var(--gris-texto)">No se pudieron cargar los comentarios</div>';
+        }
+    }
+
+    function renderComentario(c) {
+        const nombre = c.user ? `${c.user.nombre} ${c.user.apellido}` : '—';
+        const inits  = iniciales(c.user?.nombre, c.user?.apellido);
+        return `
+        <div class="comment">
+          <div class="avatar">${
+            c.user?.picture
+                ? `<img src="${c.user.picture}" alt="${nombre}">`
+                : inits
+        }</div>
+          <div class="comment-body">
+            <div class="comment-meta">
+              <span class="comment-autor">${esc(nombre)}</span>
+              <span>${tiempoRelativo(c.createdAt)}</span>
+            </div>
+            <div class="comment-texto">${esc(c.content)}</div>
+          </div>
+        </div>`;
+    }
+
+    async function enviarComentario() {
+        const input = document.getElementById('input-comentario');
+        const texto = input.value.trim();
+        if (!texto) return;
+
+        const btn = document.querySelector('.btn-comentar');
+        btn.disabled = true;
+        btn.textContent = 'Enviando…';
+
+        try {
+            const nuevo = await comentarios.crear(errorId, texto);
+            input.value = '';
+
+            const cont = document.getElementById('lista-comentarios');
+            // Quitar mensaje "sé el primero"
+            if (cont.querySelector('div[style]')) cont.innerHTML = '';
+
+            cont.insertAdjacentHTML('beforeend', renderComentario(nuevo));
+
+            // Actualizar contador
+            const countEl = document.getElementById('comentarios-count');
+            const actual  = parseInt(countEl.textContent.replace(/\D/g, '') || '0');
+            countEl.textContent = `(${actual + 1})`;
+
+            cont.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (e) {
+            alert('Error al enviar el comentario: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Enviar';
+        }
+    }
+
+    // ══════════ RESOLVER / REABRIR ══════════
+    function actualizarBtnResolver(resuelto) {
+        const btn   = document.getElementById('btn-resolver');
+        const label = document.getElementById('resolver-label');
+        if (!btn) return;
+        if (resuelto) {
+            btn.className  = 'btn btn-danger';
+            label.textContent = 'Reabrir error';
+        } else {
+            btn.className  = 'btn btn-primary';
+            label.textContent = 'Marcar como resuelto';
+        }
+    }
+
+    function abrirModalResolver() {
+        if (errorActual?.status === 'SOLVED') {
+            // Reabrir directamente (sin modal)
+            confirmarReabrir();
+            return;
+        }
+        // Abrir modal para introducir la solución
+        document.getElementById('inp-solution').value   = '';
+        document.getElementById('inp-desc-sol').value   = '';
+        document.getElementById('modal-resolver').classList.add('visible');
+        document.getElementById('inp-solution').focus();
+    }
+
+    function cerrarModal() {
+        document.getElementById('modal-resolver').classList.remove('visible');
+    }
+
+    async function confirmarResolver() {
+        const solution     = document.getElementById('inp-solution').value.trim();
+        const descSolution = document.getElementById('inp-desc-sol').value.trim();
+
+        if (!solution) {
+            document.getElementById('inp-solution').focus();
+            return;
+        }
+
+        try {
+            errorActual = await errores.resolver(errorId, solution, descSolution);
+            cerrarModal();
+            actualizarEstadoUI(true, errorActual);
+        } catch (e) {
+            alert('Error al resolver: ' + e.message);
+        }
+    }
+
+    async function confirmarReabrir() {
+        if (!confirm('¿Seguro que quieres reabrir este error?')) return;
+        try {
+            errorActual = await errores.reabrir(errorId);
+            actualizarEstadoUI(false, errorActual);
+        } catch (e) {
+            alert('Error al reabrir: ' + e.message);
+        }
+    }
+
+    function actualizarEstadoUI(resuelto, e) {
+        // Badge del topbar
+        const badge = document.getElementById('estado-badge');
+        badge.textContent = resuelto ? 'Resuelto' : 'Pendiente';
+        badge.className   = `badge badge-${resuelto ? 'resuelto' : 'pendiente'}`;
+
+        // Badge del sidebar de metadata
+        const metaEstado = document.getElementById('meta-estado-val');
+        if (metaEstado) {
+            metaEstado.innerHTML = `
+          <span class="badge badge-${resuelto ? 'resuelto' : 'pendiente'}">
+            ${resuelto ? 'Resuelto' : 'Pendiente'}
+          </span>`;
+        }
+
+        // Bloque solución
+        const bloque = document.getElementById('bloque-solucion');
+        if (bloque) bloque.innerHTML = renderBloqueSolucion(e);
+
+        // Fecha actualización
+        const upd = document.getElementById('meta-updated');
+        if (upd) upd.textContent = formatFecha(e.updatedAt);
+
+        // Botón resolver
+        actualizarBtnResolver(resuelto);
+    }
+
+    // ══════════ HELPERS ══════════
+    // Escapar HTML para evitar XSS
+    function esc(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    // Cerrar modal con Escape
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') cerrarModal();
+    });
+</script>
+</body>
+</html>

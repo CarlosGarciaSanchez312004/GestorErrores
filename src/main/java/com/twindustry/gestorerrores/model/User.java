@@ -1,11 +1,27 @@
 package com.twindustry.gestorerrores.model;
 
+import jakarta.persistence.*;
+import lombok.Data;
+
+@Entity
+@Table(name = "users")
+@Data
 public class User {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    private String username;
+
+    @Column(unique = true)
     private String email;
+
+    private String nombre;
+    private String apellido;
     private String password;
     private String picture;
+
+    @Enumerated(EnumType.STRING)
     private Role role;
+
     private boolean enable;
 }
