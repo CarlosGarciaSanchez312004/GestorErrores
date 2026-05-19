@@ -3,6 +3,8 @@ package com.twindustry.gestorerrores.model;
 import jakarta.persistence.*;
 import lombok.Data;
 
+import java.util.List;
+
 @Entity
 @Table(name = "users")
 @Data
@@ -24,4 +26,7 @@ public class User {
     private Role role;
 
     private boolean enable;
+
+    @ManyToMany(mappedBy = "users")
+    private List<Proyect> proyects;
 }

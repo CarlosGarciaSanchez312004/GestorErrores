@@ -13,12 +13,13 @@ public class Error {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(columnDefinition = "TEXT")
-    private String topic;
-
     @ManyToOne
     @JoinColumn(name = "area_id")
     private Area area;
+
+    @ManyToOne
+    @JoinColumn(name = "topic_id")
+    private Topic topic;
 
     @Column(columnDefinition = "TEXT")
     private String descriptionProblem;
