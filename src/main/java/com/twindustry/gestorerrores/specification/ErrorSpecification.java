@@ -1,9 +1,7 @@
 package com.twindustry.gestorerrores.specification;
 
-import com.twindustry.gestorerrores.model.Area;
-import com.twindustry.gestorerrores.model.Status;
-import com.twindustry.gestorerrores.model.Topic;
-import com.twindustry.gestorerrores.model.User;
+import com.twindustry.gestorerrores.model.*;
+import com.twindustry.gestorerrores.model.Error;
 import org.springframework.data.jpa.domain.Specification;
 
 public class ErrorSpecification {
@@ -29,6 +27,12 @@ public class ErrorSpecification {
         return (root, query, criteriaBuilder) ->  {
             if (topic == null) return null;
             return criteriaBuilder.equal(root.get("topic"), topic);
+        };
+    }
+    public static Specification<Error>  hasProyect(Proyect proyect) {
+        return (root, query, criteriaBuilder) -> {
+            if (proyect == null) return null;
+            return criteriaBuilder.equal(root.get("proyect"), proyect);
         };
     }
 }
